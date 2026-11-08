@@ -1,0 +1,685 @@
+# rich.eo — ألوان وصناديق وجداول وأشرطة تقدم في الطرفية
+#
+#   import rich
+#   rich.say "[bold red]هلا[/] [green]بالعالم[/] :rocket:"
+#   rich.panel "مرحبا", "العنوان"
+#   rich.rule "قسم جديد"
+#
+# الألوان تنطفي لحالها لو المخرج ملف (مو طرفية)، أو لو فيه NO_COLOR.
+# تشغّلها غصب بـ FORCE_COLOR=1 أو rich.colors(true)
+
+const VERSION = "1.0.0"
+const ESC = "\u001b["
+const RESET = "\u001b[0m"
+
+var color_on = (is_terminal() and env("NO_COLOR", "") == "") or env("FORCE_COLOR", "") != ""
+
+# rich.colors(false) يطفي الألوان، و rich.colors(true) يشغلها
+func colors on @bool {
+    color_on = on
+}
+
+# ═════════════════════════════════════════════
+#  الأنماط: "bold red on white"
+# ═════════════════════════════════════════════
+
+const STYLES = {"bold": "1", "b": "1", "dim": "2", "italic": "3", "i": "3", "underline": "4", "u": "4", "blink": "5", "reverse": "7", "hidden": "8", "strike": "9", "s": "9"}
+const COLORS = {"black": 0, "red": 1, "green": 2, "yellow": 3, "blue": 4, "magenta": 5, "purple": 5, "cyan": 6, "white": 7}
+const EXTRA = {"orange": 208, "pink": 205, "gold": 220, "brown": 130, "violet": 177, "lime": 118, "teal": 30, "navy": 18}
+
+# لون واحد → كود ANSI ("" لو مو لون)
+func color_code word @string, bg @bool {
+    var base = 30
+    if bg {
+        base = 40
+    }
+    if has(COLORS, word) {
+        return string(base + COLORS[word])
+    }
+    if startswith(word, "bright_") and has(COLORS, slice(word, 7)) {
+        return string(base + 60 + COLORS[slice(word, 7)])
+    }
+    if word == "gray" or word == "grey" {
+        return string(base + 60)
+    }
+    var mode = "38"
+    if bg {
+        mode = "48"
+    }
+    if has(EXTRA, word) {
+        return mode + ";5;" + string(EXTRA[word])
+    }
+    # #ff8800
+    if startswith(word, "#") and len(word) == 7 and is_hex(slice(word, 1)) {
+        return mode + ";2;" + string(int(slice(word, 1, 3), 16)) + ";" + string(int(slice(word, 3, 5), 16)) + ";" + string(int(slice(word, 5, 7), 16))
+    }
+    # rgb(255,136,0)
+    if startswith(word, "rgb(") and endswith(word, ")") {
+        var parts = split(slice(word, 4, len(word) - 1), ",")
+        if len(parts) == 3 and is_num(trim(parts[0])) and is_num(trim(parts[1])) and is_num(trim(parts[2])) {
+            return mode + ";2;" + trim(parts[0]) + ";" + trim(parts[1]) + ";" + trim(parts[2])
+        }
+    }
+    # color(208)  (من 256 لون)
+    if startswith(word, "color(") and endswith(word, ")") and is_num(slice(word, 6, len(word) - 1)) {
+        return mode + ";5;" + slice(word, 6, len(word) - 1)
+    }
+    return ""
+}
+
+func is_hex s @string {
+    for ch in lower(s) {
+        if not (ch in "0123456789abcdef") {
+            return false
+        }
+    }
+    return s != ""
+}
+
+func is_num s @string {
+    for ch in s {
+        if not (ch in "0123456789") {
+            return false
+        }
+    }
+    return s != ""
+}
+
+# "bold red on white" → "1;31;47"   (none لو فيه كلمة مو معروفة)
+func style_code spec @string {
+    var codes = []
+    var words = filter(split(lower(trim(replace(spec, ", ", ","))), " "), lambda w { w != "" })
+    var i = 0
+    while i < len(words) {
+        var w = words[i]
+        if w == "on" and i + 1 < len(words) {
+            var bgc = color_code(words[i + 1], true)
+            if bgc == "" {
+                return none
+            }
+            append codes, bgc
+            i += 2
+            continue
+        }
+        if has(STYLES, w) {
+            append codes, STYLES[w]
+        } else {
+            var c = color_code(w, false)
+            if c == "" {
+                return none
+            }
+            append codes, c
+        }
+        i += 1
+    }
+    if len(codes) == 0 {
+        return none
+    }
+    return join(codes, ";")
+}
+
+# ═════════════════════════════════════════════
+#  الماركب: "[bold red]نص[/]"
+# ═════════════════════════════════════════════
+
+const EMOJI = {"smile": "😄", "grin": "😁", "joy": "😂", "heart": "❤️", "fire": "🔥", "rocket": "🚀", "star": "⭐", "check": "✅", "white_check_mark": "✅", "x": "❌", "cross_mark": "❌", "warning": "⚠️", "tada": "🎉", "eyes": "👀", "wave": "👋", "thumbsup": "👍", "thumbsdown": "👎", "clap": "👏", "100": "💯", "bulb": "💡", "lock": "🔒", "key": "🔑", "gear": "⚙️", "hourglass": "⏳", "zap": "⚡", "bug": "🐛", "package": "📦", "memo": "📝", "moon": "🌙", "sun": "☀️", "coffee": "☕", "crown": "👑", "gem": "💎", "trophy": "🏆", "robot": "🤖", "computer": "💻", "globe": "🌍", "link": "🔗", "bell": "🔔", "info": "ℹ️", "question": "❓", "sparkles": "✨"}
+
+func emojis s @string {
+    if not (":" in s) {
+        return s
+    }
+    for k in keys(EMOJI) {
+        if (":" + k + ":") in s {
+            s = replace(s, ":" + k + ":", EMOJI[k])
+        }
+    }
+    return s
+}
+
+func render text, with_color @bool {
+    var s = emojis(string(text))
+    if not ("[" in s) {
+        return s
+    }
+    var chars = split(s, "")
+    var out = []
+    var stack = []
+    var n = len(chars)
+    var i = 0
+    while i < n {
+        var ch = chars[i]
+        # \[ = قوس عادي
+        if ch == "\\" and i + 1 < n and chars[i + 1] == "[" {
+            append out, "["
+            i += 2
+            continue
+        }
+        if ch == "[" {
+            var j = i + 1
+            while j < n and chars[j] != "]" and chars[j] != "[" {
+                j += 1
+            }
+            if j < n and chars[j] == "]" {
+                var tag = join(slice(chars, i + 1, j), "")
+                if startswith(tag, "/") {
+                    if len(stack) > 0 {
+                        var name = lower(trim(slice(tag, 1)))
+                        var k = len(stack) - 1
+                        if name != "" {
+                            while k >= 0 and stack[k][0] != name {
+                                k -= 1
+                            }
+                        }
+                        if k >= 0 {
+                            stack = slice(stack, 0, k) + slice(stack, k + 1)
+                            if with_color {
+                                append out, RESET
+                                for st in stack {
+                                    append out, ESC + st[1] + "m"
+                                }
+                            }
+                            i = j + 1
+                            continue
+                        }
+                    }
+                } else {
+                    var code = style_code(tag)
+                    if code != none {
+                        append stack, [lower(trim(tag)), code]
+                        if with_color {
+                            append out, ESC + code + "m"
+                        }
+                        i = j + 1
+                        continue
+                    }
+                }
+            }
+        }
+        append out, ch
+        i += 1
+    }
+    if len(stack) > 0 and with_color {
+        append out, RESET
+    }
+    return join(out, "")
+}
+
+# النص بعد الألوان (يطلع بدون ألوان لو مطفية)
+func markup text {
+    return render(text, color_on)
+}
+
+# يشيل الماركب: "[bold]هلا[/]" → "هلا"
+func strip text {
+    return render(text, false)
+}
+
+# rich.style("هلا", "bold green")
+func style text, spec @string {
+    var code = style_code(spec)
+    if code == none or not color_on {
+        return string(text)
+    }
+    return ESC + code + "m" + string(text) + RESET
+}
+
+# ═════════════════════════════════════════════
+#  الطباعة
+# ═════════════════════════════════════════════
+
+# rich.say "[bold]هلا[/] :wave:"
+func say text {
+    print markup(text)
+}
+
+# rich.log "بدأ البوت"   → [17:20:05] بدأ البوت
+func log text {
+    print markup("[dim]" + time_format() + "[/] " + string(text))
+}
+
+func success text {
+    print markup("[bold green]✔[/] " + string(text))
+}
+
+func warn text {
+    print markup("[bold yellow]⚠[/] [yellow]" + string(text) + "[/]")
+}
+
+func error text {
+    print markup("[bold red]✖ " + string(text) + "[/]")
+}
+
+func info text {
+    print markup("[bold blue]ℹ[/] " + string(text))
+}
+
+# rich.rule "قسم"   ──────── قسم ────────
+func rule title = "", spec @string = "bright_red" {
+    var w = term_width()
+    var line = "─"
+    if title == "" {
+        print style(line * w, spec)
+        return
+    }
+    var t = " " + markup(title) + " "
+    var left = (w - text_width(t)) / 2
+    if left < 2 {
+        left = 2
+    }
+    var right = w - left - text_width(t)
+    if right < 2 {
+        right = 2
+    }
+    print style(line * left, spec) + t + style(line * right, spec)
+}
+
+# ═════════════════════════════════════════════
+#  المحاذاة
+# ═════════════════════════════════════════════
+
+# يكمل النص بمسافات لين يصير بالعرض المطلوب (يحسب الإيموجي والألوان صح)
+func pad text, width @int, align @string = "left" {
+    var gap = width - text_width(text)
+    if gap <= 0 {
+        return text
+    }
+    if align == "right" {
+        return " " * gap + text
+    }
+    if align == "center" {
+        var l = gap / 2
+        return " " * l + text + " " * (gap - l)
+    }
+    return text + " " * gap
+}
+
+func widest lines @list {
+    var w = 0
+    for l in lines {
+        var x = text_width(l)
+        if x > w {
+            w = x
+        }
+    }
+    return w
+}
+
+# ═════════════════════════════════════════════
+#  Panel: نص داخل صندوق
+# ═════════════════════════════════════════════
+
+# rich.panel "النص", "العنوان"   (واللون والعرض اختياريين)
+func panel text, title = "", spec @string = "", width @int = 0 {
+    return panel_text(text, title, spec, width)
+}
+
+func panel_text text, title = "", spec @string = "", width @int = 0 {
+    var lines = split(markup(text), "\n")
+    var inner = widest(lines)
+    var t = ""
+    if title != "" {
+        t = " " + markup(title) + " "
+        if text_width(t) + 2 > inner {
+            inner = text_width(t) + 2
+        }
+    }
+    if width > 0 {
+        inner = width - 4
+    }
+    var b = lambda s { style(s, spec) }
+    var top = ""
+    if t == "" {
+        top = b("╭" + "─" * (inner + 2) + "╮")
+    } else {
+        var rest = inner + 2 - text_width(t)
+        var l = rest / 2
+        top = b("╭" + "─" * l) + t + b("─" * (rest - l) + "╮")
+    }
+    var out = [top]
+    for line in lines {
+        append out, b("│") + " " + pad(line, inner) + " " + b("│")
+    }
+    append out, b("╰" + "─" * (inner + 2) + "╯")
+    return join(out, "\n")
+}
+
+# ═════════════════════════════════════════════
+#  Table: جدول
+# ═════════════════════════════════════════════
+
+struct Column {
+    name @string
+    spec @string
+    align @string = "left"
+}
+
+# var t = rich.Table("العنوان")
+struct Table {
+    title @string
+    columns @list
+    rows @list
+    header_style @string = "bold magenta"
+    border @string = "bright_black"
+    lines @bool = false
+}
+
+# t.column "الاسم"   أو   t.column "السعر", "green", "right"
+func Table.column name @string, spec @string = "", align @string = "left" {
+    append self.columns, Column(name, spec, align)
+    return self
+}
+
+# t.row ["علي", "20"]
+func Table.row cells @list {
+    append self.rows, map(cells, lambda c { string(c) })
+    return self
+}
+
+func Table.show {
+    print self.render()
+}
+
+func Table.render {
+    var n = len(self.columns)
+    var widths = []
+    for c in self.columns {
+        append widths, text_width(markup(c.name))
+    }
+    var cells = []
+    for r in self.rows {
+        var row = []
+        for k in range(n) {
+            var v = ""
+            if k < len(r) {
+                v = r[k]
+            }
+            var col = self.columns[k]
+            if col.spec != "" {
+                v = "[" + col.spec + "]" + v + "[/]"
+            }
+            v = markup(v)
+            if text_width(v) > widths[k] {
+                widths[k] = text_width(v)
+            }
+            append row, v
+        }
+        append cells, row
+    }
+    var b = lambda s { style(s, self.border) }
+    var segs = lambda l, m, r {
+        var parts = []
+        for w in widths {
+            append parts, "─" * (w + 2)
+        }
+        return b(l + join(parts, m) + r)
+    }
+    var out = []
+    if self.title != "" {
+        var total = 1
+        for w in widths {
+            total += w + 3
+        }
+        append out, pad(markup("[italic]" + self.title + "[/]"), total, "center")
+    }
+    append out, segs("╭", "┬", "╮")
+    var head = []
+    for k in range(n) {
+        head = head + [" " + pad(style(strip(self.columns[k].name), self.header_style), widths[k], self.columns[k].align) + " "]
+    }
+    append out, b("│") + join(head, b("│")) + b("│")
+    append out, segs("├", "┼", "┤")
+    var idx = 0
+    for row in cells {
+        if self.lines and idx > 0 {
+            append out, segs("├", "┼", "┤")
+        }
+        var parts = []
+        for k in range(n) {
+            append parts, " " + pad(row[k], widths[k], self.columns[k].align) + " "
+        }
+        append out, b("│") + join(parts, b("│")) + b("│")
+        idx += 1
+    }
+    append out, segs("╰", "┴", "╯")
+    return join(out, "\n")
+}
+
+# ═════════════════════════════════════════════
+#  Progress: شريط التقدم
+# ═════════════════════════════════════════════
+
+# var bar = rich.Progress("تحميل", 100)
+# bar.advance        (+1)   bar.advance 10   bar.update 50
+struct Progress {
+    text @string
+    total @(int, float) = 100
+    done @(int, float) = 0
+    width @int = 30
+    spec @string = "bright_magenta"
+    started @float = 0.0
+    finished @bool = false
+}
+
+func Progress.advance n = 1 {
+    self.done += n
+    self.draw()
+}
+
+func Progress.update n {
+    self.done = n
+    self.draw()
+}
+
+func Progress.draw {
+    if self.started == 0.0 {
+        self.started = now()
+    }
+    var frac = 1.0
+    if self.total > 0 {
+        frac = float(self.done) / float(self.total)
+    }
+    if frac > 1.0 {
+        frac = 1.0
+    }
+    var filled = int(frac * self.width)
+    var spec = self.spec
+    if frac >= 1.0 {
+        spec = "green"
+    }
+    var bar = style("━" * filled, spec)
+    if filled < self.width {
+        bar = bar + style("╺" + "━" * (self.width - filled - 1), "bright_black")
+    }
+    var pct = pad(string(int(frac * 100)) + "%", 4, "right")
+    var line = markup(self.text) + " " + bar + " " + style(pct, "magenta") + " " + style(clock(now() - self.started), "yellow")
+    write "\r" + line + "  "
+    if frac >= 1.0 and not self.finished {
+        self.finished = true
+        write "\n"
+    }
+}
+
+# يقفل الشريط (لو ما وصل 100%)
+func Progress.stop {
+    if not self.finished {
+        self.finished = true
+        write "\n"
+    }
+}
+
+# 75.3 → "1:15"
+func clock secs {
+    var s = int(secs)
+    var m = s / 60
+    s = s % 60
+    var ss = string(s)
+    if s < 10 {
+        ss = "0" + ss
+    }
+    return string(m) + ":" + ss
+}
+
+# ═════════════════════════════════════════════
+#  Status: علامة تحميل تدور
+# ═════════════════════════════════════════════
+
+const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+# var s = rich.Status("جاري التحميل...")
+# s.tick   (كل ما تنادي يدور خطوة)    s.done "خلص"
+struct Status {
+    text @string
+    frame @int = 0
+    spec @string = "green"
+    last @int = 0
+}
+
+func Status.tick text @string = "" {
+    if text != "" {
+        self.text = text
+    }
+    var line = style(SPINNER[self.frame % len(SPINNER)], self.spec) + " " + markup(self.text)
+    self.frame += 1
+    var w = text_width(line)
+    write "\r" + line + " " * max(0, self.last - w)
+    self.last = w
+}
+
+func Status.done text @string = "" {
+    if text == "" {
+        text = self.text
+    }
+    var line = style("✔", "bold green") + " " + markup(text)
+    write "\r" + line + " " * max(0, self.last - text_width(line)) + "\n"
+}
+
+# ═════════════════════════════════════════════
+#  Tree: شجرة
+# ═════════════════════════════════════════════
+
+# var tree = rich.Tree("📁 المشروع")
+# var src = tree.add "src"
+# src.add "main.eo"
+struct Tree {
+    label
+    children @list
+}
+
+func Tree.add label {
+    var t = Tree(label)
+    append self.children, t
+    return t
+}
+
+func Tree.show {
+    print self.render()
+}
+
+func Tree.render {
+    var out = [markup(self.label)]
+    tree_lines(self, "", out)
+    return join(out, "\n")
+}
+
+func tree_lines t @Tree, prefix @string, out @list {
+    var n = len(t.children)
+    var k = 0
+    for c in t.children {
+        k += 1
+        var last = k == n
+        var branch = "├── "
+        var next = "│   "
+        if last {
+            branch = "└── "
+            next = "    "
+        }
+        append out, style(prefix + branch, "bright_black") + markup(c.label)
+        tree_lines(c, prefix + next, out)
+    }
+}
+
+# ═════════════════════════════════════════════
+#  pretty: قوائم وقواميس ملونة
+# ═════════════════════════════════════════════
+
+# rich.inspect({"name": "eo", "tags": ["fast", "simple"]})
+func inspect value {
+    print pretty(value)
+}
+
+func pretty value, indent @int = 0 {
+    var t = type(value)
+    if t == "string" {
+        return style(json_encode(value), "green")
+    }
+    if t == "int" or t == "float" {
+        return style(string(value), "cyan")
+    }
+    if t == "bool" {
+        if value {
+            return style("true", "italic bright_green")
+        }
+        return style("false", "italic bright_red")
+    }
+    if t == "none" or value == none {
+        return style("none", "italic magenta")
+    }
+    if t == "list" {
+        if len(value) == 0 {
+            return "[]"
+        }
+        var parts = map(value, lambda v { pretty(v, indent + 4) })
+        var one = "[" + join(parts, ", ") + "]"
+        if text_width(one) + indent <= 70 and not ("\n" in one) {
+            return one
+        }
+        var sp = " " * (indent + 4)
+        return "[\n" + sp + join(parts, ",\n" + sp) + "\n" + " " * indent + "]"
+    }
+    if t == "map" {
+        if len(keys(value)) == 0 {
+            return "{}"
+        }
+        var parts = []
+        for k in keys(value) {
+            append parts, style(json_encode(string(k)), "bold blue") + ": " + pretty(value[k], indent + 4)
+        }
+        var one = "{" + join(parts, ", ") + "}"
+        if text_width(one) + indent <= 70 and not ("\n" in one) {
+            return one
+        }
+        var sp = " " * (indent + 4)
+        return "{\n" + sp + join(parts, ",\n" + sp) + "\n" + " " * indent + "}"
+    }
+    return style(string(value), "yellow")
+}
+
+# ═════════════════════════════════════════════
+#  أسئلة
+# ═════════════════════════════════════════════
+
+# var name = rich.ask("وش اسمك؟")   أو   rich.ask("المدينة؟", "الرياض")
+func ask question, default @string = "" {
+    var q = "[bold]" + string(question) + "[/] "
+    if default != "" {
+        q = q + "[dim](" + default + ")[/] "
+    }
+    var answer = trim(input(markup(q)))
+    if answer == "" {
+        return default
+    }
+    return answer
+}
+
+# if rich.confirm("تكمل؟") { ... }
+func confirm question, default @bool = false {
+    var hint = "[y/N]"
+    if default {
+        hint = "[Y/n]"
+    }
+    var answer = lower(trim(input(markup("[bold]" + string(question) + "[/] [dim]\\" + hint + "[/] "))))
+    if answer == "" {
+        return default
+    }
+    return answer in ["y", "yes", "ن", "نعم", "اي", "ايه", "أيوه", "اكيد"]
+}
