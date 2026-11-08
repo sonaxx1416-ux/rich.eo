@@ -1,0 +1,44 @@
+# جولة في rich.eo:  eo demo.eo
+import rich
+
+rich.rule "[bold]rich.eo[/]"
+rich.say "[bold red]Hello[/] [green]world[/] :rocket:  [italic #ff8800]برتقالي[/]  [bold white on blue] صندوق [/]"
+rich.success "تم الحفظ"
+rich.info "معلومة"
+rich.warn "انتبه"
+rich.error "صار خطأ"
+rich.log "بدأ البرنامج"
+print
+
+rich.panel "مرحبا بك في [bold]eo[/] :wave:\nلغة برمجة بسيطة", "ترحيب", "cyan"
+
+var t = rich.Table("الأعضاء")
+t.column "الاسم", "cyan"
+t.column "النقاط", "green", "right"
+t.column "الحالة", "", "center"
+t.row ["علي", 120, ":check:"]
+t.row ["سارة", 95, ":check:"]
+t.row ["Omar", 7, "[red]غايب[/]"]
+t.show
+
+var tree = rich.Tree("📁 [bold]المشروع[/]")
+var src = tree.add "src"
+src.add "main.eo"
+src.add "[green]rich.eo[/]"
+tree.add "README.md"
+tree.show
+
+rich.inspect({"name": "eo", "version": 1.9, "ok": true, "tags": ["fast", "simple"]})
+
+var bar = rich.Progress("تحميل", 50)
+for i in range(50) {
+    sleep 0.03
+    bar.advance
+}
+
+var s = rich.Status("جاري الاتصال...")
+for i in range(25) {
+    sleep 0.08
+    s.tick
+}
+s.done "اتصلت :tada:"
