@@ -379,6 +379,10 @@ func Table.show {
     print self.render()
 }
 
+func Table.retu {
+    return self.render()
+}
+
 func Table.render {
     var n = len(self.columns)
     var widths = []
