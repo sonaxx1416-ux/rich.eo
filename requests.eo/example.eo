@@ -1,0 +1,33 @@
+# أمثلة requests.eo:  eo example.eo
+import requests
+
+# GET عادي
+var r = requests.get("https://api.github.com/users/octocat")
+print r.status_code, r.reason
+if r.ok {
+    var user = r.json()
+    print h"${user["name"]} عنده ${user["public_repos"]} مشروع"
+} else {
+    print "فشل:", r.error
+}
+
+# GET مع هيدرز
+var r2 = requests.get("https://api.github.com/repos/golang/go", {"Accept": "application/vnd.github+json", "User-Agent": "my-eo-app"})
+print h"Go فيه ${r2.json()["stargazers_count"]} نجمة"
+
+# رابط فيه بحث (params)
+var link = requests.url("https://api.github.com/search/repositories", {"q": "language:go stars:>50000", "per_page": 3})
+for repo in requests.get(link).json()["items"] {
+    print "-", repo["full_name"]
+}
+
+# POST بـ JSON
+var p = requests.post("https://httpbin.org/post", {"name": "Ali", "lang": "eo"})
+print p.status_code, p.json()["json"]
+
+# تنزيل صورة
+var img = requests.download("https://github.com/fluidicon.png", "github.png")
+print h"نزلت ${len(img.content)} بايت"
+
+# مع بروكسي (لازم في أول طلب):
+# var r3 = requests.get("https://example.com", {}, "http://127.0.0.1:8080")
